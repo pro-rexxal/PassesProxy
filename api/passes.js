@@ -2,21 +2,28 @@ export default async function handler(req, res) {
   const { userId } = req.query;
   if (!userId) return res.status(400).json({ error: "Missing userId" });
 
-  try {
-    // 1️⃣ Use v2 endpoint without accessFilter for reliability
-    const gamesRes = await fetch(
-      `https://games.roblox.com/v2/users/${userId}/games?limit=100`
-    );
-    const gamesData = await gamesRes.json();
+  async function fetchGames() {
+    // Try v2 first
+    let res1 = await fetch(`https://games.roblox.com/v2/users/${userId}/games?limit=100`);
+    let data1 = await res1.json();
+    if (data1?.data?.length) return data1.data;
 
-    if (!gamesData.data || gamesData.data.length === 0) {
-      return res.status(404).json({ error: "No public games found or Roblox API blocked response" });
-    }
+    // Fallback to v1
+    let res2 = await fetch(`https://games.roblox.com/v1/users/${userId}/games?limit=100`);
+    let data2 = await res2.json();
+    if (data2?.data?.length) return data2.data;
+
+    return [];
+  }
+
+  try {
+    const games = await fetchGames();
+    if (!games.length)
+      return res.status(404).json({ error: "No public games found or Roblox API blocked this region" });
 
     const allPasses = [];
 
-    // 2️⃣ Loop through each game and fetch its passes
-    for (const game of gamesData.data) {
+    for (const game of games) {
       const placeId = game.rootPlace?.id;
       if (!placeId) continue;
 
@@ -33,7 +40,7 @@ export default async function handler(req, res) {
               name: p.name,
               price: p.price,
               gameName: game.name,
-              placeId: placeId,
+              placeId,
             });
           });
         }
