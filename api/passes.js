@@ -1,49 +1,42 @@
-
 export default async function handler(req, res) {
+  const { userId } = req.query;
+  if (!userId) return res.status(400).json({ error: "Missing userId" });
+
   try {
-    const placeId = (req.query.placeId || req.query.placeid || "").toString().trim();
-    if (!placeId || !/^\d{1,20}$/.test(placeId)) {
-      return res.status(400).json({ error: "Missing or invalid placeId" });
+    // 1️⃣ Get all public games of the user
+    const gamesRes = await fetch(
+      `https://games.roblox.com/v2/users/${userId}/games?accessFilter=Public&limit=100`
+    );
+    const gamesData = await gamesRes.json();
+
+    if (!gamesData.data || gamesData.data.length === 0) {
+      return res.status(404).json({ error: "No public games found" });
     }
 
-    // simple in-memory cache (per serverless instance) - TTL 60s
-    // NOTE: serverless instances may be recycled; this is fine as short cache.
-    if (!global._passesCache) global._passesCache = {};
-    const cacheKey = `passes:${placeId}`;
-    const now = Date.now();
-    const cached = global._passesCache[cacheKey];
-    if (cached && (now - cached.t) < 60_000) {
-      res.setHeader("x-cache", "HIT");
-      return res.status(200).json(cached.v);
+    // 2️⃣ Fetch all game passes for each game
+    const allPasses = [];
+    for (const game of gamesData.data) {
+      const placeId = game.rootPlace?.id;
+      if (!placeId) continue;
+
+      const passesRes = await fetch(
+        `https://apis.roblox.com/game-passes/v1/game-passes?placeId=${placeId}`
+      );
+      const passesData = await passesRes.json();
+
+      if (passesData.data) {
+        // Add place name to each pass for clarity
+        passesData.data.forEach((p) => {
+          p.gameName = game.name;
+          allPasses.push(p);
+        });
+      }
     }
 
-    const apiUrl = `https://games.roblox.com/v1/games/${placeId}/game-passes?limit=100`;
-    const r = await fetch(apiUrl, { method: "GET" });
-
-    // handle upstream errors
-    const contentType = r.headers.get("content-type") || "";
-    let data;
-    if (contentType.includes("application/json")) {
-      data = await r.json();
-    } else {
-      data = { raw: await r.text() };
-    }
-
-    if (!r.ok) {
-      // Return the Roblox API status and body for debugging (but do not leak sensitive info)
-      return res.status(r.status).json({ error: "Upstream error", upstream: data });
-    }
-
-    // store in cache
-    global._passesCache[cacheKey] = { t: now, v: data };
-
-    // CORS: allow Roblox to call this from in-experience
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("x-cache", "MISS");
-    return res.status(200).json(data);
-
+    // 3️⃣ Return merged results
+    res.status(200).json({ userId, total: allPasses.length, passes: allPasses });
   } catch (err) {
-    console.error("passes handler error:", err);
-    return res.status(500).json({ error: "Internal server error", message: err.message });
+    console.error("Error fetching passes:", err);
+    res.status(500).json({ error: "Internal server error" });
   }
 }
