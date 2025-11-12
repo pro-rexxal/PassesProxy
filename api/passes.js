@@ -3,37 +3,45 @@ export default async function handler(req, res) {
   if (!userId) return res.status(400).json({ error: "Missing userId" });
 
   try {
-    // 1️⃣ Get all public games of the user
+    // 1️⃣ Use v2 endpoint without accessFilter for reliability
     const gamesRes = await fetch(
-      `https://games.roblox.com/v2/users/${userId}/games?accessFilter=Public&limit=100`
+      `https://games.roblox.com/v2/users/${userId}/games?limit=100`
     );
     const gamesData = await gamesRes.json();
 
     if (!gamesData.data || gamesData.data.length === 0) {
-      return res.status(404).json({ error: "No public games found" });
+      return res.status(404).json({ error: "No public games found or Roblox API blocked response" });
     }
 
-    // 2️⃣ Fetch all game passes for each game
     const allPasses = [];
+
+    // 2️⃣ Loop through each game and fetch its passes
     for (const game of gamesData.data) {
       const placeId = game.rootPlace?.id;
       if (!placeId) continue;
 
-      const passesRes = await fetch(
-        `https://apis.roblox.com/game-passes/v1/game-passes?placeId=${placeId}`
-      );
-      const passesData = await passesRes.json();
+      try {
+        const passesRes = await fetch(
+          `https://apis.roblox.com/game-passes/v1/game-passes?placeId=${placeId}`
+        );
+        const passesData = await passesRes.json();
 
-      if (passesData.data) {
-        // Add place name to each pass for clarity
-        passesData.data.forEach((p) => {
-          p.gameName = game.name;
-          allPasses.push(p);
-        });
+        if (passesData?.data?.length) {
+          passesData.data.forEach((p) => {
+            allPasses.push({
+              id: p.id,
+              name: p.name,
+              price: p.price,
+              gameName: game.name,
+              placeId: placeId,
+            });
+          });
+        }
+      } catch (innerErr) {
+        console.warn(`Failed to fetch passes for place ${placeId}:`, innerErr);
       }
     }
 
-    // 3️⃣ Return merged results
     res.status(200).json({ userId, total: allPasses.length, passes: allPasses });
   } catch (err) {
     console.error("Error fetching passes:", err);
