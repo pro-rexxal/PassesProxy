@@ -1,0 +1,12 @@
+{
+  "name": "roblox-passes-proxy",
+  "version": "1.0.0",
+  "description": "Proxy to fetch Roblox game passes for a place (for in-game HttpService usage).",
+  "main": "api/passes.js",
+  "scripts": {
+    "start": "vercel dev"
+  },
+  "engines": {
+    "node": "18.x"
+  }
+}
